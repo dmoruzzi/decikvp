@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>KVP Store</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 800px; margin: 40px auto; padding: 20px; background: #f5f5f5; }
+        h1 { text-align: center; margin-bottom: 30px; color: #333; }
+        .container { background: white; padding: 24px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+        .section { margin-bottom: 24px; padding-bottom: 24px; border-bottom: 1px solid #eee; }
+        .section:last-child { margin-bottom: 0; padding-bottom: 0; border-bottom: none; }
+        .section h2 { margin-bottom: 16px; color: #555; font-size: 18px; }
+        label { display: block; margin-bottom: 6px; font-weight: 500; color: #444; }
+        input, textarea { width: 100%; padding: 10px; margin-bottom: 12px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; }
+        textarea { height: 100px; font-family: monospace; resize: vertical; }
+        button { padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; }
+        .btn-post { background: #28a745; color: white; }
+        .btn-get { background: #007bff; color: white; }
+        button:hover { opacity: 0.9; }
+        .result { margin-top: 12px; padding: 12px; background: #f8f9fa; border-radius: 4px; display: none; }
+        .result.show { display: block; }
+        .result.error { background: #f8d7da; color: #721c24; }
+        .result.success { background: #d4edda; color: #155724; }
+        pre { white-space: pre-wrap; word-wrap: break-word; }
+    </style>
+</head>
+<body>
+    <h1>KVP Store</h1>
+    <div class="container">
+        <div class="section">
+            <label for="apiKey">API Key</label>
+            <input type="password" id="apiKey" placeholder="Enter API key (if required)">
+        </div>
+        <div class="section">
+            <h2>Store a Value (POST)</h2>
+            <label for="postKey">Key</label>
+            <input type="text" id="postKey" placeholder="e.g., mykey">
+            <label for="postValue">Value (any text/blob)</label>
+            <textarea id="postValue" placeholder="Any text content..."></textarea>
+            <button class="btn-post" onclick="doPost()">Store</button>
+            <div id="postResult" class="result"></div>
+        </div>
+        <div class="section">
+            <h2>Retrieve a Value (GET)</h2>
+            <label for="getKey">Key</label>
+            <input type="text" id="getKey" placeholder="e.g., mykey">
+            <button class="btn-get" onclick="doGet()">Retrieve</button>
+            <div id="getResult" class="result"></div>
+        </div>
+    </div>
+
+    <script>
+        function getHeaders() {
+            const apiKey = document.getElementById('apiKey').value.trim();
+            return apiKey ? { 'X-API-Key': apiKey } : {};
+        }
+
+        async function doPost() {
+            const key = document.getElementById('postKey').value.trim();
+            const value = document.getElementById('postValue').value.trim();
+            const resultEl = document.getElementById('postResult');
+
+            if (!key) { showResult(resultEl, 'Key is required', true); return; }
+            if (!value) { showResult(resultEl, 'Value is required', true); return; }
+
+            try {
+                const res = await fetch('/' + key, {
+                    method: 'POST',
+                    headers: getHeaders(),
+                    body: value
+                });
+                if (res.status === 401) {
+                    showResult(resultEl, 'Unauthorized - check API key', true); return;
+                }
+                await res.text();
+                showResult(resultEl, 'Stored successfully!', false);
+            } catch (e) {
+                showResult(resultEl, 'Error: ' + e.message, true);
+            }
+        }
+
+        async function doGet() {
+            const key = document.getElementById('getKey').value.trim();
+            const resultEl = document.getElementById('getResult');
+
+            if (!key) { showResult(resultEl, 'Key is required', true); return; }
+
+            try {
+                const res = await fetch('/' + key, { headers: getHeaders() });
+                if (res.status === 401) {
+                    showResult(resultEl, 'Unauthorized - check API key', true); return;
+                }
+                if (res.status === 404) {
+                    showResult(resultEl, 'Key not found or expired', true); return;
+                }
+                const data = await res.text();
+                showResult(resultEl, '<pre>' + data + '</pre>', false);
+            } catch (e) {
+                showResult(resultEl, 'Error: ' + e.message, true);
+            }
+        }
+
+        function showResult(el, msg, isError) {
+            el.className = 'result show ' + (isError ? 'error' : 'success');
+            el.innerHTML = msg;
+        }
+    </script>
+</body>
+</html>
