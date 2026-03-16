@@ -163,7 +163,7 @@ func checkAndCleanupBySize() {
 		}
 		result, err := db.Exec(`
 			DELETE FROM kv_store WHERE key IN (
-				SELECT key FROM kv_store ORDER BY expires_at ASC
+				SELECT key FROM kv_store ORDER BY expires_at ASC LIMIT 1
 			)
 		`)
 		if err != nil || result == nil {
