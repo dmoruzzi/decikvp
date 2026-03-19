@@ -2,6 +2,7 @@ package main
 
 import (
 	"database/sql"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -41,6 +42,25 @@ func main() {
 		log.Fatal(err)
 	}
 
+	_, err = db.Exec(`
+		CREATE TABLE IF NOT EXISTS usage_stats (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+			method TEXT,
+			key TEXT,
+			status TEXT,
+			response_time_ms INTEGER
+		)
+	`)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	_, err = db.Exec(`CREATE INDEX IF NOT EXISTS idx_stats_timestamp ON usage_stats(timestamp)`)
+	if err != nil {
+		log.Fatal(err)
+	}
+
 	go cleanupExpired()
 
 	http.HandleFunc("/", handleRequest)
@@ -57,6 +77,11 @@ func handleRequest(w http.ResponseWriter, r *http.Request) {
 		} else {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		}
+		return
+	}
+
+	if path == "/stats" {
+		handleStats(w, r)
 		return
 	}
 
@@ -83,6 +108,7 @@ func handleRequest(w http.ResponseWriter, r *http.Request) {
 }
 
 func handlePost(w http.ResponseWriter, r *http.Request, key string) {
+	start := time.Now()
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		http.Error(w, "Failed to read body", http.StatusBadRequest)
@@ -104,9 +130,12 @@ func handlePost(w http.ResponseWriter, r *http.Request, key string) {
 
 	w.WriteHeader(http.StatusCreated)
 	w.Write([]byte("stored"))
+
+	logStats("POST", key, time.Since(start).Milliseconds())
 }
 
 func handleGet(w http.ResponseWriter, r *http.Request, key string) {
+	start := time.Now()
 	var value string
 	var expiresAt time.Time
 
@@ -131,6 +160,8 @@ func handleGet(w http.ResponseWriter, r *http.Request, key string) {
 	}
 
 	w.Write([]byte(value))
+
+	logStats("GET", key, time.Since(start).Milliseconds())
 }
 
 func cleanupExpired() {
@@ -176,4 +207,53 @@ func checkAndCleanupBySize() {
 	}
 	lastCleanup = time.Now()
 	log.Println("Cleanup by size complete")
+}
+
+func logStats(method, key string, durationMs int64) {
+	go func() {
+		db.Exec(`INSERT INTO usage_stats (method, key, response_time_ms) VALUES (?, ?, ?)`,
+			method, key, durationMs)
+	}()
+}
+
+func handleStats(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	type statRow struct {
+		TotalRequests   int64
+		TotalPosts      int64
+		TotalGets       int64
+		UniqueKeys      int64
+		AvgResponseTime float64
+		TotalKeys       int64
+	}
+
+	var stats statRow
+
+	err := db.QueryRow(`
+		SELECT 
+			COALESCE((SELECT COUNT(*) FROM usage_stats), 0) as total_requests,
+			COALESCE((SELECT COUNT(*) FROM usage_stats WHERE method = 'POST'), 0) as total_posts,
+			COALESCE((SELECT COUNT(*) FROM usage_stats WHERE method = 'GET'), 0) as total_gets,
+			COALESCE((SELECT COUNT(DISTINCT key) FROM usage_stats), 0) as unique_keys,
+			COALESCE((SELECT AVG(response_time_ms) FROM usage_stats), 0) as avg_response_time,
+			COALESCE((SELECT COUNT(*) FROM kv_store), 0) as total_keys
+	`).Scan(&stats.TotalRequests, &stats.TotalPosts, &stats.TotalGets, &stats.UniqueKeys, &stats.AvgResponseTime, &stats.TotalKeys)
+
+	if err != nil {
+		log.Printf("Stats query error: %v", err)
+		http.Error(w, "Failed to retrieve stats", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.Write([]byte(`{"total_requests":` + fmt.Sprint(stats.TotalRequests) +
+		`,"total_posts":` + fmt.Sprint(stats.TotalPosts) +
+		`,"total_gets":` + fmt.Sprint(stats.TotalGets) +
+		`,"unique_keys":` + fmt.Sprint(stats.UniqueKeys) +
+		`,"total_keys":` + fmt.Sprint(stats.TotalKeys) +
+		`,"avg_response_time_ms":` + fmt.Sprint(stats.AvgResponseTime) + `}`))
 }
