@@ -49,12 +49,6 @@ func main() {
 }
 
 func handleRequest(w http.ResponseWriter, r *http.Request) {
-	if apiKey != "" && r.Header.Get("X-API-Key") != apiKey {
-		w.Header().Set("WWW-Authenticate", `Basic realm="Restricted"`)
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
-		return
-	}
-
 	path := r.URL.Path
 
 	if path == "/" || path == "/index.html" {
@@ -63,6 +57,12 @@ func handleRequest(w http.ResponseWriter, r *http.Request) {
 		} else {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		}
+		return
+	}
+
+	if apiKey != "" && r.Header.Get("X-API-Key") != apiKey {
+		w.Header().Set("WWW-Authenticate", `Basic realm="Restricted"`)
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	}
 
